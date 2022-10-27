@@ -1,6 +1,8 @@
 struct stat;
 struct rtcdate;
+
 // system calls
+int getreadcount(void);
 int fork(void);
 int exit(void) __attribute__((noreturn));
 int wait(void);
