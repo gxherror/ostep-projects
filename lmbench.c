@@ -1,0 +1,1 @@
+sched_getaffinity(pid_t pid, unsigned int cpusetsize, cpu_set_t *mask);
