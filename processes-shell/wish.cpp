@@ -10,12 +10,12 @@
 #define MAXPATH 10
 using namespace std;
 
-string builtInCmd[]={"ls","show","add"};
+string builtInCmd[]={"show","add"};
 string externalCmdFindPath[MAXPATH];
 int parseLine(char *buf, string * args);
 void init();
 void runBuiltInCmd(string* args);
-void runCmd(string * args);
+void runCmd(string * args,bool isLast);
 
 int find(string array[],string value,int length);
 
@@ -34,7 +34,7 @@ int main(int argc, char* argv[])
         {
             int i=0;
             char * strs = new char[s.length() + 1] ;
-	        strcpy(strs, s.c_str()); 
+	          strcpy(strs, s.c_str()); 
             char* lineTemp=strdup(strs);
             for (char* cmd=strsep(&lineTemp,"&");cmd!=NULL;cmd=strsep(&lineTemp,"&"),i++){
                 int j=0;
@@ -52,18 +52,25 @@ int main(int argc, char* argv[])
     }
     string line;
     while(getline(cin,line)){
-      string args[MAXARGS];
-      char * ptr;
-      ptr=strdup(line.c_str());
-      parseLine(ptr,args);
-      
-      int length = sizeof(builtInCmd)/(sizeof(builtInCmd[0]));
-      if(find(builtInCmd,args[0],length)){
-        //runBuiltInCmd(args);
-      }else
-      {
-        runCmd(args);
-      }    
+      if (line=="") continue;
+      char* linePtr=strdup(line.c_str());
+      int i=0;
+      bool isLast = false;
+      for (char* cmd=strsep(&linePtr,"&");cmd!=NULL;cmd=strsep(&linePtr,"&"),i++){
+        if (linePtr==NULL) isLast=true;
+        int j=0;
+        string args[MAXARGS];
+        parseLine(cmd,args);
+        int length = sizeof(builtInCmd)/(sizeof(builtInCmd[0]));
+        int i = find(builtInCmd,args[0],length);
+        if(i!=-1){
+          //runBuiltInCmd(args);
+        }else
+        {
+          runCmd(args,isLast);
+        }  
+      }
+  
     }
     return 0;
     
@@ -102,7 +109,7 @@ int parseLine(char *buf, string * args)
   return 0;
 }
 
-void runCmd(string args[]){
+void runCmd(string args[],bool isLast){
   int rc = fork();
     if (rc < 0) {
         fprintf(stderr, "fork failed\n");
@@ -136,9 +143,11 @@ void runCmd(string args[]){
     } else {
         // parent goes down this path (main)
         // wait children to exit
-        int status=0;
-        int wc=wait(&status);
-        printf("hello, I am parent of %d (pid:%d)\n",rc, (int) getpid());
+        //int status=0;
+        if (isLast){
+          while (wait(NULL)!=-1){} 
+          printf("hello, I am parent of %d (pid:%d)\n",rc, (int) getpid());
+        }
     }
 }
 
