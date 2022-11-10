@@ -158,7 +158,6 @@ main(int argc, char *argv[])
   // fix size of root inode dir
   rinode(rootino, &din);
   off = xint(din.size);
-  //整块分配
   off = ((off/BSIZE) + 1) * BSIZE;
   din.size = xint(off);
   winode(rootino, &din);
@@ -208,7 +207,6 @@ rinode(uint inum, struct dinode *ip)
   *ip = *dip;
 }
 
-//block sec read
 void
 rsect(uint sec, void *buf)
 {
@@ -282,16 +280,12 @@ iappend(uint inum, void *xp, int n)
       rsect(xint(din.addrs[NDIRECT]), (char*)indirect);
       if(indirect[fbn - NDIRECT] == 0){
         indirect[fbn - NDIRECT] = xint(freeblock++);
-        //间接inode块写
         wsect(xint(din.addrs[NDIRECT]), (char*)indirect);
       }
-      //间接数据块地址
       x = xint(indirect[fbn-NDIRECT]);
     }
-    //n file size
     n1 = min(n, (fbn + 1) * BSIZE - off);
     rsect(x, buf);
-    //补全部分数据块
     bcopy(p, buf + off - (fbn * BSIZE), n1);
     wsect(x, buf);
     n -= n1;
