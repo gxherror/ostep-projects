@@ -9,7 +9,7 @@
 #define CRMETA 40
 
 #define IMAPMETA 40
-#define IPMP ((BSIZE-IMAPMETA) / sizeof(uint)) //inodes per imap block
+#define IPMP ((BSIZE-IMAPMETA) / sizeof(inode*)) //inodes per imap block
 #define MAXIMAP (MAXINODE/IPMP) //max imap number
 #define IMBLOCK(i) (i/IPMP) // imap block containing inode i
 

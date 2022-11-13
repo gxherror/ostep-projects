@@ -31,7 +31,8 @@ int nblocks;  // number of data blocks
 int fsfd;
 struct checkregion *cr;
 char zeroes[BSIZE];
-block * freeptr=NULL; 
+block * freeptr=(block *)malloc(1000*BSIZE); 
+block * bptr=NULL;
 uint free_inode=0;
 
 void balloc(int);
@@ -76,7 +77,7 @@ int LFS_Shutdown();
 void IMAP_Write(imap* imap);
 void DATA_Write(block* data,inode* inode,int length);
 void INODE_Write(inode* inode);
-void* MMAP_init(int argc , char* argv[]);
+int MMAP_init(int argc , char* argv[]);
 
 int LFS_Init(){
 
@@ -151,15 +152,17 @@ void LFS_Write(block* data_ptr,int length,inode* inode_ptr,uint inode_num){
   imap tmp_imap;
   memset(&tmp_imap,0x0,sizeof(imap));
   if (imap_ptr_old!=NULL){
-    memcpy(tmp_imap.inode_ptr,imap_ptr_old->inode_ptr,nino_offset*sizeof(*inode_ptr));
+    int length=0;
+    for (;imap_ptr_old->inode_ptr[length]!=NULL;++length);
+    memcpy(tmp_imap.inode_ptr,imap_ptr_old->inode_ptr,length*sizeof(*inode_ptr));
   }
   tmp_imap.inode_ptr[nino_offset]=(inode *)(freeptr-1);
   IMAP_Write(&tmp_imap);
   cr->imap_ptr[nimap]=(imap*)(freeptr-1);
 }
 
-void IMAP_Write(imap* imap){
-  wsect((block*)imap,sizeof(imap));
+void IMAP_Write(imap* imap_ptr){
+  wsect((block*)imap_ptr,sizeof(imap));
 }
 
 void DATA_Write(block* data_ptr,inode *inode_ptr,int length){
@@ -181,20 +184,35 @@ void INODE_Write(inode* inode_ptr){
   wsect((block*)inode_ptr,sizeof(inode));
 }
 
-void LFS_Read(uint inode_num,block** data_ptr,inode** inode_ptr){
+void LFS_Read(uint inode_num,block* data_ptr,inode* inode_ptr){
   uint nimap = IMBLOCK(inode_num);
   uint ino_offset = inode_num % IPMP;
   imap* imap_ptr=cr->imap_ptr[nimap];
   if (imap_ptr!=NULL){
-    *inode_ptr = imap_ptr->inode_ptr[ino_offset];
-    *data_ptr = (*inode_ptr)->data_addrs[0];
+    //*inode_ptr = imap_ptr->inode_ptr[ino_offset];
+    //*data_ptr = *(inode_ptr)->data_addrs[0];
+    *inode_ptr = *(imap_ptr->inode_ptr[ino_offset]);
+    *data_ptr = *(inode_ptr->data_addrs[0]);
   }
 }
+
+int LFS_Lookup(char* name){
+  assert(strchr(name, '/') == name);
+  ++name;
+  block tmp_data;
+  memset(&tmp_data,0x0,BSIZE);
+  dirent * root_dirnet;
+  inode tmp_inode;
+  memset(&tmp_inode,0x0,sizeof(inode));
+  LFS_Read(ROOTINO,&tmp_data,&tmp_inode);
+  root_dirnet = (dirent *)&tmp_data;
+  for (;strcmp(root_dirnet->name,name)!=0 && root_dirnet->inum!=-1;++root_dirnet){};
+  return root_dirnet->inum;
+} 
 
 int
 main(int argc, char *argv[])
 {
-  int i, cc, fd;
   uint rootino, inum, off;
   struct dirent de;
   char buf[BSIZE];
@@ -202,8 +220,9 @@ main(int argc, char *argv[])
   static_assert(sizeof(int) == 4, "Integers must be 4 bytes!");
   assert((BSIZE % sizeof(struct dirent)) == 0);
 
-  block* bptr =(block *) MMAP_init(argc,argv);
-  freeptr = bptr;
+  int fd = MMAP_init(argc,argv);
+  strcpy((char*)freeptr,(const char*)bptr);
+  //freeptr = bptr;
   LFS_Init();
   //write /foo
 
@@ -221,15 +240,17 @@ main(int argc, char *argv[])
   test_inode.type = TYPE_FILE;
   LFS_Write(&test_block,test_len,&test_inode,test_inode_num);
 
-  block * data_ptr;
+  block tmp_data;
+  memset(&tmp_data,0x0,BSIZE);
   dirent * root_dirnet;
-  inode *inode_ptr;
-  LFS_Read(ROOTINO,&data_ptr,&inode_ptr);
-  root_dirnet = (dirent *)data_ptr;
+  inode tmp_inode;
+  memset(&tmp_inode,0x0,sizeof(inode));
+  LFS_Read(ROOTINO,&tmp_data,&tmp_inode);
+  root_dirnet = (dirent *)&tmp_data;
   root_dirnet[2].inum = test_inode_num;
   strcpy(root_dirnet[2].name ,"foo.txt");
-  LFS_Write(data_ptr,NDIRECT*sizeof(dirent),inode_ptr,ROOTINO);
-
+  LFS_Write(&tmp_data,NDIRECT*sizeof(dirent),&tmp_inode,ROOTINO);
+  int inode_num = LFS_Lookup("/foo.txt");
   /*
   for(i = 0; i < FSSIZE; i++)
     wsect(i, zeroes);
@@ -288,11 +309,18 @@ main(int argc, char *argv[])
 
   balloc(freeblock);
   */
+  char data[] = "phzphz\nphzphz";
+  int len = strlen(data);
+  cr->nblocks=1;
+  memcpy(bptr,(char*)cr,BSIZE);
+  munmap(bptr,BSIZE);
+  write(fd,cr,1000*BSIZE);
+  close(fd);
   exit(0);
 }
 
 //mmap init 
-void* MMAP_init(int argc , char* argv[]){
+int  MMAP_init(int argc , char* argv[]){
     if(argc < 2){
         printf("File path not mentioned\n");
         exit(1);
@@ -310,144 +338,13 @@ void* MMAP_init(int argc , char* argv[]){
         exit(1);
     }
 
-    void *ptr = mmap(NULL,statbuf.st_size,PROT_READ|PROT_WRITE,MAP_PRIVATE,fd,0);
+    void *ptr = mmap(NULL,BSIZE,PROT_READ|PROT_WRITE,MAP_PRIVATE,fd,0);
     if(ptr == MAP_FAILED){
         char *msg = strerror(errno);
         printf("Mapping Failed,error msg: %s\n",msg);
         
         exit(1);
     }
-    close(fd);
-    return ptr;
+    bptr = (block *)ptr;
+    return fd;
 }
-
-/*
-void
-wsect(uint sec, void *buf)
-{
-  if(lseek(fsfd, sec * BSIZE, 0) != sec * BSIZE){
-    perror("lseek");
-    exit(1);
-  }
-  if(write(fsfd, buf, BSIZE) != BSIZE){
-    perror("write");
-    exit(1);
-  }
-}
-
-void
-winode(uint inum, struct dinode *ip)
-{
-  char buf[BSIZE];
-  uint bn;
-  struct dinode *dip;
-
-  bn = IBLOCK(inum, sb);
-  rsect(bn, buf);
-  dip = ((struct dinode*)buf) + (inum % IPB);
-  *dip = *ip;
-  wsect(bn, buf);
-}
-
-void
-rinode(uint inum, struct dinode *ip)
-{
-  char buf[BSIZE];
-  uint bn;
-  struct dinode *dip;
-
-  bn = IBLOCK(inum, sb);
-  rsect(bn, buf);
-  dip = ((struct dinode*)buf) + (inum % IPB);
-  *ip = *dip;
-}
-
-void
-rsect(uint sec, void *buf)
-{
-  if(lseek(fsfd, sec * BSIZE, 0) != sec * BSIZE){
-    perror("lseek");
-    exit(1);
-  }
-  if(read(fsfd, buf, BSIZE) != BSIZE){
-    perror("read");
-    exit(1);
-  }
-}
-
-uint
-ialloc(ushort type)
-{
-  uint inum = freeinode++;
-  struct dinode din;
-
-  bzero(&din, sizeof(din));
-  din.type = xshort(type);
-  din.nlink = xshort(1);
-  din.size = xint(0);
-  winode(inum, &din);
-  return inum;
-}
-
-void
-balloc(int used)
-{
-  uchar buf[BSIZE];
-  int i;
-
-  printf("balloc: first %d blocks have been allocated\n", used);
-  assert(used < BSIZE*8);
-  bzero(buf, BSIZE);
-  for(i = 0; i < used; i++){
-    buf[i/8] = buf[i/8] | (0x1 << (i%8));
-  }
-  printf("balloc: write bitmap block at sector %d\n", sb.bmapstart);
-  wsect(sb.bmapstart, buf);
-}
-
-#define min(a, b) ((a) < (b) ? (a) : (b))
-
-void
-iappend(uint inum, void *xp, int n)
-{
-  char *p = (char*)xp;
-  uint fbn, off, n1;
-  struct dinode din;
-  char buf[BSIZE];
-  uint indirect[NINDIRECT];
-  uint x;
-
-  rinode(inum, &din);
-  off = xint(din.size);
-  // printf("append inum %d at off %d sz %d\n", inum, off, n);
-  while(n > 0){
-    fbn = off / BSIZE;
-    assert(fbn < MAXFILE);
-    if(fbn < NDIRECT){
-      if(xint(din.addrs[fbn]) == 0){
-        din.addrs[fbn] = xint(freeblock++);
-      }
-      x = xint(din.addrs[fbn]);
-    } else {
-      if(xint(din.addrs[NDIRECT]) == 0){
-        din.addrs[NDIRECT] = xint(freeblock++);
-      }
-      rsect(xint(din.addrs[NDIRECT]), (char*)indirect);
-      if(indirect[fbn - NDIRECT] == 0){
-        indirect[fbn - NDIRECT] = xint(freeblock++);
-        wsect(xint(din.addrs[NDIRECT]), (char*)indirect);
-      }
-      x = xint(indirect[fbn-NDIRECT]);
-    }
-    n1 = min(n, (fbn + 1) * BSIZE - off);
-    rsect(x, buf);
-    bcopy(p, buf + off - (fbn * BSIZE), n1);
-    wsect(x, buf);
-    n -= n1;
-    off += n1;
-    p += n1;
-  }
-  din.size = xint(off);
-  winode(inum, &din);
-}
-*/
