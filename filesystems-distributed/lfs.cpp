@@ -28,10 +28,9 @@ int nimaps; //number of imap blocks
 int ninodes;    // number of inode blocks
 int nblocks;  // number of data blocks
 
-int fsfd;
+int fsfd=0;
 struct checkregion *cr;
-char zeroes[BSIZE];
-block * freeptr=(block *)malloc(1000*BSIZE); 
+block * freeptr=(block *)malloc(MAXBLOCK*BSIZE); 
 block * bptr=NULL;
 uint free_inode=0;
 
@@ -42,34 +41,13 @@ void rinode(uint inum, struct dinode *ip);
 void rsect(block * dstptr, void *buf,int length);
 uint ialloc(ushort type);
 void iappend(uint inum, void *p, int n);
-
-// convert to intel byte order
-ushort
-xshort(ushort x)
-{
-  ushort y;
-  uchar *a = (uchar*)&y;
-  a[0] = x;
-  a[1] = x >> 8;
-  return y;
-}
-
-uint
-xint(uint x)
-{
-  uint y;
-  uchar *a = (uchar*)&y;
-  a[0] = x;
-  a[1] = x >> 8;
-  a[2] = x >> 16;
-  a[3] = x >> 24;
-  return y;
-}
-
+void LFS_test();
 int LFS_Init();
 int LFS_Lookup(char *name);
 int LFS_Stat(int inum, dinode *m);
 void LFS_Write(block* data_ptr,int length,inode* inode_ptr,uint inode_num);
+void LFS_FileWrite(char * name);
+void LFS_FileRead(char * name,block *block_ptr);
 void LFS_Read(uint inode_num,block* data_ptr,inode* inode_ptr);
 int LFS_Creat(int pinum, int type, char *name);
 int LFS_Unlink(int pinum, char *name);
@@ -77,14 +55,63 @@ int LFS_Shutdown();
 void IMAP_Write(imap* imap);
 void DATA_Write(block* data,inode* inode,int length);
 void INODE_Write(inode* inode);
-int MMAP_init(int argc , char* argv[]);
+int MMAP_init(char* fs_name);
+
+int
+main(int argc, char *argv[])
+{
+  static_assert(sizeof(int) == 4, "Integers must be 4 bytes!");
+  assert((BSIZE % sizeof(struct dirent)) == 0);
+  MMAP_init("lfs.img");
+  //strcpy((char*)freeptr,(const char*)bptr);
+  //LFS_Init();
+  //write /foo
+  //LFS_test();
+  block read_block;
+  LFS_FileRead("/text",&read_block);
+  write(STDOUT_FILENO,&read_block,BSIZE);
+  int err = LFS_Shutdown();
+  exit(0);
+}
+
+//mmap init 
+int  MMAP_init(char * fs_name){
+    const char *fullFileName = fs_name;
+    struct stat statbuf;
+    fsfd = open(fullFileName, O_RDWR);
+    if(fsfd < 0){
+        printf("\n\"%s \" could not open\n",fullFileName);
+        exit(1);
+    }
+    int err = fstat(fsfd, &statbuf);
+    if(err < 0){
+        printf("\n\"%s \" could not open\n",fullFileName);
+        exit(1);
+    }
+
+    void *ptr = mmap(NULL,MAXBLOCK*BSIZE,PROT_READ|PROT_WRITE,MAP_PRIVATE,fsfd,0);
+    if(ptr == MAP_FAILED){
+        char *msg = strerror(errno);
+        printf("Mapping Failed,error msg: %s\n",msg);
+        
+        exit(1);
+    }
+    cr = (checkregion*)ptr;
+    free_inode = cr->free_inode;
+    freeptr = cr->freeptr;
+    bptr = (block *)ptr;
+    //freeptr = bptr;
+    return fsfd;
+}
 
 int LFS_Init(){
-
   cr =(checkregion*)freeptr;
   cr->nblocks = 0;
   cr->nimaps = 0;
   cr->ninodes = 0;
+  cr->total_blocks = 0;
+  cr->free_inode = 0;
+  cr->freeptr =NULL;
   for (int i=0;i<MAXIMAP;++i){
     cr->imap_ptr[i] = NULL ;
   }
@@ -142,6 +169,48 @@ void rsect(block * dstptr, void *buf,int length)
 
 }
 
+void LFS_FileWrite(char * name){
+  if (name!=NULL){
+  try
+  {
+    access(name,7);
+    int fd = open (name,O_RDWR);
+    struct stat statbuf;
+    int err = fstat(fd, &statbuf);
+    int block_num = statbuf.st_size / BSIZE +1;
+    //block* block_ptr =(block*)malloc(block_num*BSIZE);
+    block block_ptr;
+    memset(&block_ptr,0x0,statbuf.st_size);
+    read(fd,&block_ptr,statbuf.st_size);
+    
+    inode test_inode;
+    int inode_num = free_inode ; 
+    ++free_inode;
+    memset(&test_inode,0x0,sizeof(inode));
+    test_inode.size = statbuf.st_size;
+    test_inode.nlink = 1;
+    test_inode.type = TYPE_FILE;
+    LFS_Write(&block_ptr,statbuf.st_size,&test_inode,inode_num);
+
+    block tmp_data;
+    memset(&tmp_data,0x0,BSIZE);
+    dirent * root_dirnet;
+    inode tmp_inode;
+    memset(&tmp_inode,0x0,sizeof(inode));
+    LFS_Read(ROOTINO,&tmp_data,&tmp_inode);
+    root_dirnet = (dirent *)&tmp_data;
+    root_dirnet[3].inum = inode_num;
+    strcpy(root_dirnet[3].name ,name);
+    LFS_Write(&tmp_data,NDIRECT*sizeof(dirent),&tmp_inode,ROOTINO); 
+  }
+  catch(const std::exception& e)
+  {
+    std::cerr << e.what() << '\n';
+  }
+    
+  }
+}
+
 void LFS_Write(block* data_ptr,int length,inode* inode_ptr,uint inode_num){
   uint nimap = IMBLOCK(inode_num);
   uint nino_offset = inode_num % IPMP;
@@ -154,7 +223,8 @@ void LFS_Write(block* data_ptr,int length,inode* inode_ptr,uint inode_num){
   if (imap_ptr_old!=NULL){
     int length=0;
     for (;imap_ptr_old->inode_ptr[length]!=NULL;++length);
-    memcpy(tmp_imap.inode_ptr,imap_ptr_old->inode_ptr,length*sizeof(*inode_ptr));
+    //!!with bug 
+    memcpy(tmp_imap.inode_ptr,imap_ptr_old->inode_ptr,length*sizeof(inode*));
   }
   tmp_imap.inode_ptr[nino_offset]=(inode *)(freeptr-1);
   IMAP_Write(&tmp_imap);
@@ -163,6 +233,7 @@ void LFS_Write(block* data_ptr,int length,inode* inode_ptr,uint inode_num){
 
 void IMAP_Write(imap* imap_ptr){
   wsect((block*)imap_ptr,sizeof(imap));
+  ++cr->nimaps;
 }
 
 void DATA_Write(block* data_ptr,inode *inode_ptr,int length){
@@ -174,6 +245,7 @@ void DATA_Write(block* data_ptr,inode *inode_ptr,int length){
   {
     int n1 = min(BSIZE,n);
     inode_ptr->data_addrs[i]=freeptr;
+    ++cr->nblocks;
     ++i;
     wsect(data_ptr,n1);
     n = n -n1;
@@ -182,6 +254,16 @@ void DATA_Write(block* data_ptr,inode *inode_ptr,int length){
 
 void INODE_Write(inode* inode_ptr){
   wsect((block*)inode_ptr,sizeof(inode));
+  ++cr->ninodes;
+}
+
+void LFS_FileRead(char * name,block *block_ptr){
+  memset(block_ptr,0x0,BSIZE);
+  int inode_num = LFS_Lookup(name);
+  inode lookup_inode;
+  memset(&lookup_inode,0x0,sizeof(inode));
+  LFS_Read(inode_num,block_ptr,&lookup_inode);
+
 }
 
 void LFS_Read(uint inode_num,block* data_ptr,inode* inode_ptr){
@@ -210,21 +292,7 @@ int LFS_Lookup(char* name){
   return root_dirnet->inum;
 } 
 
-int
-main(int argc, char *argv[])
-{
-  uint rootino, inum, off;
-  struct dirent de;
-  char buf[BSIZE];
-
-  static_assert(sizeof(int) == 4, "Integers must be 4 bytes!");
-  assert((BSIZE % sizeof(struct dirent)) == 0);
-
-  int fd = MMAP_init(argc,argv);
-  strcpy((char*)freeptr,(const char*)bptr);
-  //freeptr = bptr;
-  LFS_Init();
-  //write /foo
+void LFS_test(){
 
   block test_block;
   uint test_len = strlen("foofoofoo");
@@ -250,101 +318,45 @@ main(int argc, char *argv[])
   root_dirnet[2].inum = test_inode_num;
   strcpy(root_dirnet[2].name ,"foo.txt");
   LFS_Write(&tmp_data,NDIRECT*sizeof(dirent),&tmp_inode,ROOTINO);
+
+  block lookup_data;
+  memset(&lookup_data,0x0,BSIZE);
+  inode lookup_inode;
+  memset(&lookup_inode,0x0,sizeof(inode));
   int inode_num = LFS_Lookup("/foo.txt");
-  /*
-  for(i = 0; i < FSSIZE; i++)
-    wsect(i, zeroes);
-
-  memset(buf, 0, sizeof(buf));
-  memmove(buf, &sb, sizeof(sb));
-  wsect(1, buf);
-
-  rootino = ialloc(T_DIR);
-  assert(rootino == ROOTINO);
-
-  bzero(&de, sizeof(de));
-  de.inum = xshort(rootino);
-  strcpy(de.name, ".");
-  iappend(rootino, &de, sizeof(de));
-
-  bzero(&de, sizeof(de));
-  de.inum = xshort(rootino);
-  strcpy(de.name, "..");
-  iappend(rootino, &de, sizeof(de));
-
-  for(i = 2; i < argc; i++){
-    assert(index(argv[i], '/') == 0);
-
-    if((fd = open(argv[i], 0)) < 0){
-      perror(argv[i]);
-      exit(1);
-    }
-
-    // Skip leading _ in name when writing to file system.
-    // The binaries are named _rm, _cat, etc. to keep the
-    // build operating system from trying to execute them
-    // in place of system binaries like rm and cat.
-    if(argv[i][0] == '_')
-      ++argv[i];
-
-    inum = ialloc(T_FILE);
-
-    bzero(&de, sizeof(de));
-    de.inum = xshort(inum);
-    strncpy(de.name, argv[i], DIRSIZ);
-    iappend(rootino, &de, sizeof(de));
-
-    while((cc = read(fd, buf, sizeof(buf))) > 0)
-      iappend(inum, buf, cc);
-
-    close(fd);
-  }
-
-  // fix size of root inode dir
-  rinode(rootino, &din);
-  off = xint(din.size);
-  off = ((off/BSIZE) + 1) * BSIZE;
-  din.size = xint(off);
-  winode(rootino, &din);
-
-  balloc(freeblock);
-  */
-  char data[] = "phzphz\nphzphz";
-  int len = strlen(data);
-  cr->nblocks=1;
-  memcpy(bptr,(char*)cr,BSIZE);
-  munmap(bptr,BSIZE);
-  write(fd,cr,1000*BSIZE);
-  close(fd);
-  exit(0);
+  LFS_Read(inode_num,&tmp_data,&tmp_inode);
+  write(STDOUT_FILENO,&tmp_data,BSIZE);
 }
 
-//mmap init 
-int  MMAP_init(int argc , char* argv[]){
-    if(argc < 2){
-        printf("File path not mentioned\n");
-        exit(1);
-    }
-    const char *fullFileName = argv[1];
-    struct stat statbuf;
-    int fd = open(fullFileName, O_RDWR);
-    if(fd < 0){
-        printf("\n\"%s \" could not open\n",fullFileName);
-        exit(1);
-    }
-    int err = fstat(fd, &statbuf);
-    if(err < 0){
-        printf("\n\"%s \" could not open\n",fullFileName);
-        exit(1);
-    }
+// convert to intel byte order
+ushort
+xshort(ushort x)
+{
+  ushort y;
+  uchar *a = (uchar*)&y;
+  a[0] = x;
+  a[1] = x >> 8;
+  return y;
+}
 
-    void *ptr = mmap(NULL,BSIZE,PROT_READ|PROT_WRITE,MAP_PRIVATE,fd,0);
-    if(ptr == MAP_FAILED){
-        char *msg = strerror(errno);
-        printf("Mapping Failed,error msg: %s\n",msg);
-        
-        exit(1);
-    }
-    bptr = (block *)ptr;
-    return fd;
+uint
+xint(uint x)
+{
+  uint y;
+  uchar *a = (uchar*)&y;
+  a[0] = x;
+  a[1] = x >> 8;
+  a[2] = x >> 16;
+  a[3] = x >> 24;
+  return y;
+}
+
+int LFS_Shutdown(){
+  cr->total_blocks = cr->nblocks +cr->ninodes +cr->nimaps +1;
+  cr->free_inode = free_inode;
+  cr->freeptr = freeptr;
+  //memcpy(bptr,(char*)cr,BSIZE);
+  write(fsfd,bptr,MAXBLOCK*BSIZE);
+  munmap(bptr,BSIZE);
+  close(fsfd);
 }

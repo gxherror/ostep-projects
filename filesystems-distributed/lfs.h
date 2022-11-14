@@ -2,7 +2,7 @@
 #define LFS_h
 // On-disk file system format.
 // Both the kernel and user programs use this header file.
-
+#define MAXBLOCK 1000
 #define ROOTINO 0  // root i-number
 #define BSIZE 512  // block size
 #define MAXINODE 4096 //max inode number
@@ -53,8 +53,11 @@ struct checkregion {
   uint nblocks;      // number of data blocks
   uint ninodes;      // number of inode blocks
   uint nimaps;       // number of imaps blocks  
-  uchar reserved[CRMETA-3*sizeof(uint)];
-  imap* imap_ptr[MAXIMAP]; //imap block address 
+  uint total_blocks;
+  uint free_inode;
+  block *freeptr;
+  uchar reserved[CRMETA-4*sizeof(uint)];
+  imap* imap_ptr[MAXIMAP]; //imap block address
 };
 
 struct dirent {
