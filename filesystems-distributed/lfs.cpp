@@ -17,10 +17,6 @@
 #include "param.h"
 */
 using namespace std;
-#ifndef static_assert
-#define static_assert(a, b) do { switch (0) case 0: case (a): ; } while (0)
-#endif
-
 // Disk layout:
 // [ check region | data blocks | inode blocks | imap block ]
 
@@ -34,34 +30,10 @@ block * freeptr=(block *)malloc(MAXBLOCK*BSIZE);
 block * bptr=NULL;
 uint free_inode=0;
 
-void balloc(int);
-void wsect(block *buf,int length);
-void winode(uint, struct dinode*);
-void rinode(uint inum, struct dinode *ip);
-void rsect(block * dstptr, void *buf,int length);
-uint ialloc(ushort type);
-void iappend(uint inum, void *p, int n);
-void LFS_test();
-int LFS_Init();
-int LFS_Lookup(char *name);
-int LFS_Stat(int inum, dinode *m);
-void LFS_Write(block* data_ptr,int length,inode* inode_ptr,uint inode_num);
-void LFS_FileWrite(char * name);
-void LFS_FileRead(char * name,block *block_ptr);
-void LFS_Read(uint inode_num,block* data_ptr,inode* inode_ptr);
-int LFS_Creat(int pinum, int type, char *name);
-int LFS_Unlink(int pinum, char *name);
-int LFS_Shutdown();
-void IMAP_Write(imap* imap);
-void DATA_Write(block* data,inode* inode,int length);
-void INODE_Write(inode* inode);
-int MMAP_init(char* fs_name);
-
 int
 main(int argc, char *argv[])
 {
-  static_assert(sizeof(int) == 4, "Integers must be 4 bytes!");
-  assert((BSIZE % sizeof(struct dirent)) == 0);
+  //assert((BSIZE % sizeof(struct dirent)) == 0);
   MMAP_init("lfs.img");
   //strcpy((char*)freeptr,(const char*)bptr);
   //LFS_Init();
@@ -70,8 +42,8 @@ main(int argc, char *argv[])
   block read_block;
   LFS_FileRead("/text",&read_block);
   write(STDOUT_FILENO,&read_block,BSIZE);
-  int err = LFS_Shutdown();
-  exit(0);
+  //int err = LFS_Shutdown();
+  //exit(0);
 }
 
 //mmap init 
@@ -327,7 +299,6 @@ void LFS_test(){
   LFS_Read(inode_num,&tmp_data,&tmp_inode);
   write(STDOUT_FILENO,&tmp_data,BSIZE);
 }
-
 // convert to intel byte order
 ushort
 xshort(ushort x)

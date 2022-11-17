@@ -1,5 +1,11 @@
 #include<iostream>
+#include<string.h>
+#include<stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include "lfs.h"
+using namespace std;
 int main(){
-    int x=0;
-    if (x==0) if (x==1){} else return ;
+    int fd = MMAP_init("lfs.img");
+    extern checkregion* cr;
 }
