@@ -98,7 +98,6 @@ void *thread(void *vargp)
     while (1) {
         int connfd = sbuf_remove(&sbuf); /* Remove connfd from buffer */
         echo_cnt(connfd);
-        /* Service client */
         Close(connfd);
     }
 }
